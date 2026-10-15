@@ -1,0 +1,126 @@
+VERIFY_RESULT: FAIL
+TASK_ID: verify-2990-fix1
+AGENT_ID: gpu-assistant-3090
+SERVER: poissongpu06
+
+READ THIS FIRST (operator note):
+  The delivered verify_fix1.py cannot run as written - it imports a module path
+  that does not exist in the fix branch, so it fails before testing anything.
+  FAIL is the verdict for the script as specified in TASK.md.
+  The fix ITSELF was verified afterwards by the operator with only the two
+  harness path errors corrected (RUN D): it PASSES.
+  => harness broken, fix under test looks correct. Details in EVIDENCE below.
+
+TIMING:
+  claimed_at: 2026-10-15T02:06:03Z
+  started_at: 2026-10-15T02:23:34Z
+  finished_at: 2026-10-15T03:35:00Z
+  duration_total: ~1h11m (of which ~35m was building an isolated env, see ANOMALIES)
+  NOTE: the server wall clock runs +8h ahead of true UTC (timezone Etc/UTC,
+        NTPSynchronized=no). All times above are true UTC taken from the operator host.
+
+ENVIRONMENT:
+  gpu: NVIDIA GeForce RTX 3090, 570.124.06, 24576 MiB  (8 cards; this task needs 0)
+  torch: 2.14.1+cu130 / cuda_available: False
+         (host driver mismatch: kernel module 570.124.06 vs userspace libs 580.178.04;
+          irrelevant here - the task is CPU-only)
+  python: 3.11.9, clean venv /data3/zsy/opensource/verify/_shared2990/venv
+  target_code: bantianyue/torchtune@fix/T-2990-eleuther-skip-gpt2-download@0ad198defd24c
+               "Skip GPT-2 weight download in eleuther_eval wrapper"
+  lm_eval: 0.4.8
+  key_deps: transformers==4.45.2 / huggingface-hub==0.26.5 / tokenizers==0.20.3 /
+            torchao==0.18.0 / torchdata==0.11.0 / torchvision==0.29.1 /
+            omegaconf==2.4.0 / datasets==4.0.0 / accelerate==1.15.0
+            (full list in data/key_deps.txt)
+
+STEP_LOG:
+  - step: "env precheck" / status: OK / duration: 10s
+    notes: "torch present; lm-eval not installed yet (installed in a later step)"
+  - step: "clone fix branch" / status: OK / duration: 40s
+    notes: "the server has NO direct GitHub egress; cloned via the corporate proxy
+            172.19.90.131:8080 (proxysg.huawei.com is unreachable from this segment)"
+  - step: "install lm-eval==0.4.8 + missing deps" / status: OK / duration: ~3m
+    notes: "used the internal Huawei PyPI mirror (mirrors.tools.huawei.com, ~15MB/s);
+            the corporate proxy only gives ~32KB/s for PyPI"
+  - step: "RUN A: python verify_fix1.py  (exactly as TASK.md)" / status: FAIL / duration: 10s
+    notes: "ModuleNotFoundError: No module named 'torchtune.recipes'"
+  - step: "RUN D: operator variant, import path corrected + HF mirror + TLS verify off"
+    / status: OK / duration: ~2m / notes: "prints PASS and exits 0"
+
+EVIDENCE:
+  --- RUN A, exactly as TASK.md specifies ---
+  Traceback (most recent call last):
+    File "/data3/zsy/opensource/verify/verify-2990-fix1/verify_fix1.py", line 21, in <module>
+      from torchtune.recipes.eleuther_eval import _LLMEvalWrapper
+  ModuleNotFoundError: No module named 'torchtune.recipes'
+  exit code: 1
+
+  --- RUN D, operator variant (only the import path corrected; see SUGGESTIONS) ---
+  Fix present: _LLMEvalWrapper._create_model override found
+  Wrapper instantiated OK
+  PASS: No GPT-2 weights downloaded; model rebound correctly.
+  GPT-2 cache (config/tokenizer only, expected):
+    special_tokens_map.json
+    added_tokens.json
+    tokenizer.json
+    tokenizer_config.json
+    vocab.json
+    config.json
+  exit code: 0
+
+  --- independent check: weight-file scan of the gpt2 cache ---
+  find ~/.cache/huggingface/hub/models--gpt2 -type f \( -name '*.bin' -o -name '*.safetensors' -o -name '*.pt' -o -name '*.ckpt' \)
+  -> (no results)   [data/gpt2_weight_files.txt]
+  full cache file list: [data/gpt2_cache_filelist.txt]
+
+ANOMALIES:
+  - Server clock is +8h ahead of true UTC (timezone Etc/UTC, NTPSynchronized=no).
+  - Server has no GitHub/HF egress: github.com and huggingface.co both fail DNS;
+    the corporate proxy reaches github.com but returns "504 CONNECT tunnel failed"
+    for huggingface.co.
+  - hf-mirror.com IS reachable through the corporate proxy, but the proxy MITMs TLS
+    with a self-signed chain, so `requests` (huggingface_hub) rejects it. Corporate CA
+    files exist on the host (/etc/ssl/certs/HuaweiITRootCA.pem, huaweiproxy.pem, ...);
+    the operator runner disabled TLS verification instead of using REQUESTS_CA_BUNDLE.
+  - The clean venv first resolved transformers 5.19.0, which no longer has
+    transformers.AutoModelForVision2Seq that lm-eval 0.4.8 imports at module level.
+    Pinned to transformers==4.45.2 (+ huggingface-hub==0.26.5, tokenizers==0.20.3).
+  - torchvision was missing and is imported by torchtune.data.
+  - The test script deletes ~/.cache/huggingface/hub/models--gpt2 before instantiating,
+    so it REQUIRES live Hub access for gpt2 config/tokenizer. Pre-seeding the cache
+    cannot help.
+
+FAILURE_ANALYSIS:
+  failed_step: RUN A - "python verify_fix1.py", step 4 of TASK.md
+  error_excerpt:
+    File ".../verify_fix1.py", line 21, in <module>
+      from torchtune.recipes.eleuther_eval import _LLMEvalWrapper
+    ModuleNotFoundError: No module named 'torchtune.recipes'
+  hypothesis: >
+    The script targets `torchtune.recipes.eleuther_eval`. torchtune ships recipes as a
+    TOP-LEVEL directory (pyproject.toml: [tool.setuptools.packages.find] include =
+    ["torchtune*", "recipes*"]) and recipes/__init__.py deliberately raises
+    ModuleNotFoundError("The torchtune recipes directory isn't a package and you should
+    not import anything from here"). There is no torchtune/recipes package at all.
+    So NO import form from the `torchtune.` namespace can ever work.
+    The same defect appears in all three 2990 tasks (fix1, fix2, fix3).
+  retried: >
+    Yes. RUN A reproduced identically 3 times. RUN D (same script, import path and
+    patch targets corrected, HF mirror endpoint supplied) passed deterministically.
+
+SUGGESTIONS:
+  1. Fix the three scripts before re-dispatching. Minimal working recipe:
+       PYTHONPATH=<repo>:<repo>/recipes
+       from eleuther_eval import _LLMEvalWrapper      # not torchtune.recipes.*
+     (verified working; see data/operator_variant_script.py)
+  2. fix1's test needs HuggingFace Hub access because it deletes the gpt2 cache and
+     then fetches config+tokenizer. On this host that requires HF_ENDPOINT=https://hf-mirror.com
+     plus a proxy AND a trusted CA. Either grant that, or stub AutoConfig/AutoTokenizer
+     so the test no longer depends on the network.
+  3. The recipe module can also be loaded without sys.path tricks via
+     importlib.util.spec_from_file_location("eleuther_eval", "<repo>/recipes/eleuther_eval.py").
+  4. Do not run these tests in the shared /data3/zsy/venv: it is a much newer stack
+     (transformers 4.46/hub 1.5) that lm-eval 0.4.8 cannot import. A pinned isolated
+     env is required; the operator built one at _shared2990/venv (see data/key_deps.txt).
+  5. Fix the host clock (NTP) - timestamps written on the server are 8h off.
+  6. Prefer REQUESTS_CA_BUNDLE=/etc/ssl/certs/HuaweiITRootCA.pem over disabling TLS verification.

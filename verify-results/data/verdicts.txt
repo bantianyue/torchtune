@@ -1,0 +1,5 @@
+RUN A exit code: 1
+RUN B exit code: 1
+RUN C exit code: 1
+PASS: No GPT-2 weights downloaded; model rebound correctly.
+RUN D exit code: 0
