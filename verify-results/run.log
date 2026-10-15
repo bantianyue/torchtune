@@ -1,0 +1,74 @@
+
+###################################################################
+### RUN A: EXACTLY as TASK.md -- python verify_fix2.py
+### (env: clean venv /data3/zsy/opensource/verify/_shared2990/venv, PYTHONPATH=/data3/zsy/opensource/verify/verify-2990-fix2/torchtune-fix2)
+###################################################################
+--- cloning fix/T-2990-eleuther-multimodal-truncation ---
+Cloning into 'torchtune-fix2'...
+/data3/zsy/opensource/verify/verify-2990-fix2/torchtune-fix2/torchtune/__init__.py:18: UserWarning: The 'torch' module has already been imported. Setting PYTORCH_CUDA_ALLOC_CONF may not have an effect.For best results, set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before importing 'torch'.
+  warnings.warn(
+/data3/zsy/opensource/verify/_shared2990/venv/lib/python3.11/site-packages/torch/cuda/__init__.py:228: UserWarning: CUDA initialization: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 804: forward compatibility was attempted on non supported HW (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return torch._C._cuda_getDeviceCount() > 0
+W1015 11:06:46.539000 336156 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+Traceback (most recent call last):
+  File "/data3/zsy/opensource/verify/verify-2990-fix2/verify_fix2.py", line 19, in <module>
+    from torchtune.recipes.eleuther_eval import _VLMEvalWrapper
+ModuleNotFoundError: No module named 'torchtune.recipes'
+RUN A exit code: 1
+
+###################################################################
+### RUN B: OPERATOR VARIANT -- import path corrected only
+### change: from torchtune.recipes.eleuther_eval import X
+###      -> from eleuther_eval import X   (with recipes/ on sys.path)
+### why: torchtune ships recipes as a top-level dir whose __init__.py
+###      deliberately raises; torchtune.recipes does not exist at all.
+###################################################################
+--- diff (original vs corrected) ---
+19c19
+< from torchtune.recipes.eleuther_eval import _VLMEvalWrapper
+---
+> from eleuther_eval import _VLMEvalWrapper
+--- run ---
+/data3/zsy/opensource/verify/_shared2990/venv/lib/python3.11/site-packages/torch/cuda/__init__.py:228: UserWarning: CUDA initialization: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 804: forward compatibility was attempted on non supported HW (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return torch._C._cuda_getDeviceCount() > 0
+W1015 11:06:52.820000 336241 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+/data3/zsy/opensource/verify/verify-2990-fix2/torchtune-fix2/torchtune/__init__.py:18: UserWarning: The 'torch' module has already been imported. Setting PYTORCH_CUDA_ALLOC_CONF may not have an effect.For best results, set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before importing 'torch'.
+  warnings.warn(
+Traceback (most recent call last):
+  File "/data3/zsy/opensource/verify/verify-2990-fix2/verify_fix2_corrected.py", line 61, in <module>
+    with patch("torchtune.recipes.eleuther_eval.local_kv_cache"):
+  File "/data3/zsy/venv/lib/python3.11/unittest/mock.py", line 1430, in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+  File "/data3/zsy/venv/lib/python3.11/pkgutil.py", line 715, in resolve_name
+    result = getattr(result, p)
+             ^^^^^^^^^^^^^^^^^^
+AttributeError: module 'torchtune' has no attribute 'recipes'
+RUN B exit code: 1
+
+###################################################################
+### RUN C: OPERATOR VARIANT v2 -- BOTH wrong references corrected
+###  1) import: from torchtune.recipes.eleuther_eval import X -> from eleuther_eval import X
+###  2) patch targets: "torchtune.recipes.eleuther_eval.Y" -> "eleuther_eval.Y"
+###################################################################
+--- diff (original vs corrected v2) ---
+19c19
+< from torchtune.recipes.eleuther_eval import _VLMEvalWrapper
+---
+> from eleuther_eval import _VLMEvalWrapper
+61c61
+< with patch("torchtune.recipes.eleuther_eval.local_kv_cache"):
+---
+> with patch("eleuther_eval.local_kv_cache"):
+--- run ---
+/data3/zsy/opensource/verify/_shared2990/venv/lib/python3.11/site-packages/torch/cuda/__init__.py:228: UserWarning: CUDA initialization: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 804: forward compatibility was attempted on non supported HW (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return torch._C._cuda_getDeviceCount() > 0
+W1015 11:07:56.907000 337021 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+/data3/zsy/opensource/verify/verify-2990-fix2/torchtune-fix2/torchtune/__init__.py:18: UserWarning: The 'torch' module has already been imported. Setting PYTORCH_CUDA_ALLOC_CONF may not have an effect.For best results, set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True before importing 'torch'.
+  warnings.warn(
+Return shape: (1, 54)
+Prompt prefix intact OK
+Generated suffix OK: [5, 5, 5, 999]
+Harness slice [:50:] -> [5, 5, 5, 999] (non-empty, correct)
+PASS: _model_multimodal_generate returns full sequence; harness contract satisfied.
+RUN C exit code: 0

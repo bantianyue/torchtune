@@ -1,0 +1,122 @@
+VERIFY_RESULT: FAIL
+TASK_ID: verify-2990-fix2
+AGENT_ID: gpu-assistant-3090
+SERVER: poissongpu06
+
+READ THIS FIRST (operator note):
+  The delivered verify_fix2.py cannot run as written - it references a module path
+  that does not exist in the fix branch, in BOTH the import line and the
+  unittest.mock patch targets. It fails before testing anything.
+  FAIL is the verdict for the script as specified in TASK.md.
+  The fix ITSELF was verified afterwards by the operator with only those path
+  references corrected (RUN C): it PASSES.
+  => harness broken, fix under test looks correct. Evidence below.
+
+TIMING:
+  claimed_at: 2026-10-15T02:06:03Z
+  started_at: 2026-10-15T02:23:34Z
+  finished_at: 2026-10-15T03:35:00Z
+  duration_total: ~1h11m (shared env build ~35m; this task's own runs < 1m)
+  NOTE: the server wall clock runs +8h ahead of true UTC (timezone Etc/UTC,
+        NTPSynchronized=no). Times above are true UTC from the operator host.
+
+ENVIRONMENT:
+  gpu: NVIDIA GeForce RTX 3090, 570.124.06, 24576 MiB  (8 cards; this task needs 0)
+  torch: 2.14.1+cu130 / cuda_available: False
+         (host driver mismatch: kernel module 570.124.06 vs userspace libs 580.178.04;
+          irrelevant here - mock/CPU test)
+  python: 3.11.9, clean venv /data3/zsy/opensource/verify/_shared2990/venv
+  target_code: bantianyue/torchtune@fix/T-2990-eleuther-multimodal-truncation@52ecec93f30a
+               "Return full sequence from VLM eval wrapper generate"
+  lm_eval: 0.4.8
+  key_deps: transformers==4.45.2 / huggingface-hub==0.26.5 / tokenizers==0.20.3 /
+            torchao==0.18.0 / torchdata==0.11.0 / torchvision==0.29.1 /
+            omegaconf==2.4.0 / datasets==4.0.0 / accelerate==1.15.0
+            (full list in data/key_deps.txt)
+
+STEP_LOG:
+  - step: "env precheck" / status: OK / duration: 10s / notes: "CPU-only mock test; no checkpoint needed"
+  - step: "clone fix branch" / status: OK / duration: 40s
+    notes: "cloned via corporate proxy 172.19.90.131:8080 (no direct GitHub egress on the server)"
+  - step: "install lm-eval==0.4.8 + deps" / status: OK / duration: ~3m
+    notes: "internal Huawei PyPI mirror ~15MB/s; shared with fix1/fix3"
+  - step: "RUN A: python verify_fix2.py (exactly as TASK.md)" / status: FAIL / duration: 8s
+    notes: "ModuleNotFoundError: No module named 'torchtune.recipes' (import line 19)"
+  - step: "RUN C: operator variant, both wrong path references corrected" / status: OK / duration: 20s
+    notes: "prints PASS and exits 0"
+
+EVIDENCE:
+  --- RUN A, exactly as TASK.md specifies ---
+  File ".../verify_fix2.py", line 19, in <module>
+    from torchtune.recipes.eleuther_eval import _VLMEvalWrapper
+  ModuleNotFoundError: No module named 'torchtune.recipes'
+  exit code: 1
+
+  --- RUN B (only the import line corrected): second failure surfaces ---
+  File ".../verify_fix2_corrected.py", line 61, in <module>
+    with patch("torchtune.recipes.eleuther_eval.local_kv_cache"):
+  AttributeError: module 'torchtune' has no attribute 'recipes'
+  exit code: 1
+
+  --- RUN C, operator variant (import line AND patch targets corrected) ---
+  Return shape: (1, 54)
+  Prompt prefix intact OK
+  Generated suffix OK: [5, 5, 5, 999]
+  Harness slice [:50:] -> [5, 5, 5, 999] (non-empty, correct)
+  PASS: _model_multimodal_generate returns full sequence; harness contract satisfied.
+  exit code: 0
+
+  This is exactly the defect-2 contract: the old code returned only the generated
+  tokens, so the harness slice cont_toks[context_enc.shape[1]:] produced an empty
+  list. With the fix the returned tensor has shape (1, prompt_len + 4) = (1, 54),
+  the prompt prefix is intact, and the harness slice yields the 4 generated tokens.
+
+ANOMALIES:
+  - Server clock is +8h ahead of true UTC (timezone Etc/UTC, NTPSynchronized=no).
+  - The script has TWO hardcoded wrong module paths: the import line (line 19) and
+    the patch target (line 61). Correcting only the import is not enough.
+  - The clean venv first resolved transformers 5.19.0, which lacks
+    transformers.AutoModelForVision2Seq that lm-eval 0.4.8 imports at module level;
+    pinned to transformers==4.45.2 (+ huggingface-hub==0.26.5, tokenizers==0.20.3).
+  - torchvision was missing and is imported by torchtune.data.
+  - torchao is imported unconditionally by torchtune/__init__.py and was absent.
+  - Harmless warnings during the runs: torch CUDA init warning (Error 804, driver
+    mismatch on this host), a pytree KernelPreference deprecation warning from torchao,
+    and "torch module has already been imported" from torchtune.
+
+FAILURE_ANALYSIS:
+  failed_step: RUN A - "python verify_fix2.py", step 4 of TASK.md
+  error_excerpt:
+    File ".../verify_fix2.py", line 19, in <module>
+      from torchtune.recipes.eleuther_eval import _VLMEvalWrapper
+    ModuleNotFoundError: No module named 'torchtune.recipes'
+    (after fixing only that line:)
+    AttributeError: module 'torchtune' has no attribute 'recipes'   [line 61 patch target]
+  hypothesis: >
+    Same root cause as verify-2990-fix1: torchtune ships recipes as a TOP-LEVEL
+    directory (pyproject.toml include = ["torchtune*", "recipes*"]) and
+    recipes/__init__.py deliberately raises ModuleNotFoundError to forbid importing
+    recipes as a package. `torchtune.recipes` does not exist. The script uses that
+    path twice - once for the import and once as a unittest.mock patch target - so it
+    fails twice for the same reason.
+  retried: >
+    Yes. RUN A reproduced identically. RUN B isolated the second bad reference.
+    RUN C (paths corrected) passed deterministically.
+
+SUGGESTIONS:
+  1. Minimal working recipe for this script (verified):
+       PYTHONPATH=<repo>:<repo>/recipes
+       from eleuther_eval import _VLMEvalWrapper
+       with patch("eleuther_eval.local_kv_cache"):      # not torchtune.recipes.eleuther_eval.*
+     See data/operator_variant_script.py for the exact diff.
+  2. Prefer patching the module object instead of a dotted string, e.g.
+       import eleuther_eval
+       with patch.object(eleuther_eval, "local_kv_cache"):
+     so a future path change cannot silently break the test again.
+  3. The mock model returns logits shaped (bsz, seq, VOCAB); the test asserts
+     argmax GEN_ID 3 times then STOP_ID. That contract held here: generated suffix
+     [5, 5, 5, 999]. Good coverage of the truncation defect.
+  4. Consider adding an assertion on the pre-fix behaviour (that the old code would
+     have produced an EMPTY slice) so the test is a true regression test.
+  5. Do not run these tests in the shared /data3/zsy/venv (newer transformers/hub that
+     lm-eval 0.4.8 cannot import); use the pinned isolated env described in data/key_deps.txt.

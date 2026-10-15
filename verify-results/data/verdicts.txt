@@ -1,0 +1,4 @@
+RUN A exit code: 1
+RUN B exit code: 1
+PASS: _model_multimodal_generate returns full sequence; harness contract satisfied.
+RUN C exit code: 0

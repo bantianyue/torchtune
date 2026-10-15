@@ -1,0 +1,5 @@
+Return shape: (1, 54)
+Prompt prefix intact OK
+Generated suffix OK: [5, 5, 5, 999]
+Harness slice [:50:] -> [5, 5, 5, 999] (non-empty, correct)
+PASS: _model_multimodal_generate returns full sequence; harness contract satisfied.
