@@ -1,0 +1,119 @@
+VERIFY_RESULT: FAIL
+TASK_ID: verify-2990-fix3
+AGENT_ID: gpu-assistant-3090
+SERVER: poissongpu06
+
+READ THIS FIRST (operator note):
+  The delivered verify_fix3.py cannot run as written - it references a module path
+  that does not exist in the fix branch, in the import line AND in both
+  unittest.mock patch targets. It fails before testing anything.
+  FAIL is the verdict for the script as specified in TASK.md.
+  The fix ITSELF was verified afterwards by the operator with only those path
+  references corrected (RUN C): it PASSES, all three budgets plus the fallback.
+  => harness broken, fix under test looks correct. Evidence below.
+
+TIMING:
+  claimed_at: 2026-10-15T02:06:03Z
+  started_at: 2026-10-15T02:23:34Z
+  finished_at: 2026-10-15T03:35:00Z
+  duration_total: ~1h11m (shared env build ~35m; this task's own runs < 1m)
+  NOTE: the server wall clock runs +8h ahead of true UTC (timezone Etc/UTC,
+        NTPSynchronized=no). Times above are true UTC from the operator host.
+
+ENVIRONMENT:
+  gpu: NVIDIA GeForce RTX 3090, 570.124.06, 24576 MiB  (8 cards; this task needs 0)
+  torch: 2.14.1+cu130 / cuda_available: False
+         (host driver mismatch: kernel module 570.124.06 vs userspace libs 580.178.04;
+          irrelevant here - mock/CPU test)
+  python: 3.11.9, clean venv /data3/zsy/opensource/verify/_shared2990/venv
+  target_code: bantianyue/torchtune@fix/T-2990-eleuther-max-gen-toks@de7c83767e16
+               "Respect harness max_gen_toks in eleuther_eval generate"
+  lm_eval: 0.4.8
+  key_deps: transformers==4.45.2 / huggingface-hub==0.26.5 / tokenizers==0.20.3 /
+            torchao==0.18.0 / torchdata==0.11.0 / torchvision==0.29.1 /
+            omegaconf==2.4.0 / datasets==4.0.0 / accelerate==1.15.0
+            (full list in data/key_deps.txt)
+
+STEP_LOG:
+  - step: "env precheck" / status: OK / duration: 10s / notes: "CPU-only mock test"
+  - step: "clone fix branch" / status: OK / duration: 40s
+    notes: "cloned via corporate proxy 172.19.90.131:8080 (no direct GitHub egress on the server)"
+  - step: "install lm-eval==0.4.8 + deps" / status: OK / duration: ~3m
+    notes: "internal Huawei PyPI mirror ~15MB/s; shared with fix1/fix2"
+  - step: "RUN A: python verify_fix3.py (exactly as TASK.md)" / status: FAIL / duration: 8s
+    notes: "ModuleNotFoundError: No module named 'torchtune.recipes' (import line 14)"
+  - step: "RUN C: operator variant, all wrong path references corrected" / status: OK / duration: 20s
+    notes: "prints PASS and exits 0"
+
+EVIDENCE:
+  --- RUN A, exactly as TASK.md specifies ---
+  File ".../verify_fix3.py", line 14, in <module>
+    from torchtune.recipes.eleuther_eval import _LLMEvalWrapper
+  ModuleNotFoundError: No module named 'torchtune.recipes'
+  exit code: 1
+
+  --- RUN B (only the import line corrected): second failure surfaces ---
+  File ".../verify_fix3_corrected.py", line 38, in <module>
+    with patch("torchtune.recipes.eleuther_eval.local_kv_cache"), \
+  AttributeError: module 'torchtune' has no attribute 'recipes'
+  exit code: 1
+
+  --- RUN C, operator variant (import line AND both patch targets corrected) ---
+    requested=64 -> max_generated_tokens=64 OK
+    requested=256 -> max_generated_tokens=256 OK
+    requested=1024 -> max_generated_tokens=1024 OK
+    no max_length -> fallback 256 OK
+  PASS: _model_generate respects harness max_gen_toks via max_length.
+  exit code: 0
+
+  All four cases required by TASK.md are covered: 64 / 256 / 1024 derived from
+  max_length = context_len + max_gen_toks, plus the 256 fallback when max_length
+  is absent. Patch points used by the operator variant: eleuther_eval.local_kv_cache
+  and eleuther_eval.generate (the script's intended patch points, only renamed).
+
+ANOMALIES:
+  - Server clock is +8h ahead of true UTC (timezone Etc/UTC, NTPSynchronized=no).
+  - The script has THREE hardcoded wrong module paths: the import line (14) and the
+    two patch targets (lines 38-39). Correcting only the import is not enough.
+  - The clean venv first resolved transformers 5.19.0, which lacks
+    transformers.AutoModelForVision2Seq that lm-eval 0.4.8 imports at module level;
+    pinned to transformers==4.45.2 (+ huggingface-hub==0.26.5, tokenizers==0.20.3).
+  - torchvision was missing and is imported by torchtune.data.
+  - torchao is imported unconditionally by torchtune/__init__.py and was absent.
+  - Harmless warnings during the runs: torch CUDA init warning (Error 804, driver
+    mismatch on this host), pytree KernelPreference deprecation warning from torchao,
+    and "torch module has already been imported" from torchtune.
+
+FAILURE_ANALYSIS:
+  failed_step: RUN A - "python verify_fix3.py", step 4 of TASK.md
+  error_excerpt:
+    File ".../verify_fix3.py", line 14, in <module>
+      from torchtune.recipes.eleuther_eval import _LLMEvalWrapper
+    ModuleNotFoundError: No module named 'torchtune.recipes'
+    (after fixing only that line:)
+    AttributeError: module 'torchtune' has no attribute 'recipes'   [lines 38-39 patch targets]
+  hypothesis: >
+    Same root cause as verify-2990-fix1/fix2: torchtune ships recipes as a TOP-LEVEL
+    directory (pyproject.toml include = ["torchtune*", "recipes*"]) and
+    recipes/__init__.py deliberately raises ModuleNotFoundError. `torchtune.recipes`
+    does not exist. This script references that path three times, so it fails at the
+    import and would fail again at each patch target.
+  retried: >
+    Yes. RUN A reproduced identically. RUN B isolated the patch-target failures.
+    RUN C (paths corrected) passed deterministically.
+
+SUGGESTIONS:
+  1. Minimal working recipe for this script (verified):
+       PYTHONPATH=<repo>:<repo>/recipes
+       from eleuther_eval import _LLMEvalWrapper
+       with patch("eleuther_eval.local_kv_cache"), \
+            patch("eleuther_eval.generate", side_effect=fake_generate):
+     See data/operator_variant_script.py for the exact diff.
+  2. Use patch.object(eleuther_eval, "generate", ...) on the imported module rather
+     than a dotted string, so path drift cannot break the test silently.
+  3. Worth adding a case where max_length < seq_len (the fix uses max(1, ...)); the
+     current test never exercises that clamp.
+  4. Consider asserting the pre-fix behaviour too (hardcoded 256 would be returned for
+     the 64 and 1024 requests) so the test is a true regression test.
+  5. Do not run these tests in the shared /data3/zsy/venv (newer transformers/hub that
+     lm-eval 0.4.8 cannot import); use the pinned isolated env described in data/key_deps.txt.

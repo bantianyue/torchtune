@@ -1,0 +1,5 @@
+  requested=64 -> max_generated_tokens=64 OK
+  requested=256 -> max_generated_tokens=256 OK
+  requested=1024 -> max_generated_tokens=1024 OK
+  no max_length -> fallback 256 OK
+PASS: _model_generate respects harness max_gen_toks via max_length.

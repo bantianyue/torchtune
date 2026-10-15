@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/data3/zsy/opensource/verify/verify-2990-fix3/verify_fix3.py", line 14, in <module>
+    from torchtune.recipes.eleuther_eval import _LLMEvalWrapper
+ModuleNotFoundError: No module named 'torchtune.recipes'
+RUN A exit code: 1
+
+###################################################################

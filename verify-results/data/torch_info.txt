@@ -1,0 +1,4 @@
+/data3/zsy/opensource/verify/_shared2990/venv/lib/python3.11/site-packages/torch/cuda/__init__.py:228: UserWarning: CUDA initialization: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 804: forward compatibility was attempted on non supported HW (Triggered internally at /__w/pytorch/pytorch/c10/cuda/CUDAFunctions.cpp:119.)
+  return torch._C._cuda_getDeviceCount() > 0
+torch 2.14.1+cu130 cuda_available False
+python 3.11.9 (main, Apr 19 2024, 16:48:06) [GCC 11.2.0]

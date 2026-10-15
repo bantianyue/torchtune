@@ -1,0 +1,4 @@
+RUN A exit code: 1
+RUN B exit code: 1
+PASS: _model_generate respects harness max_gen_toks via max_length.
+RUN C exit code: 0
